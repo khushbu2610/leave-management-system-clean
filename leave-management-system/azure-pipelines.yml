@@ -1,0 +1,90 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  dockerHubUsername: 'khushbu2610'
+  imageName: 'leave-management-system'
+  imageTag: '$(Build.BuildId)'
+
+stages:
+
+- stage: BuildAndTest
+  displayName: 'Build and Test'
+  jobs:
+  - job: MavenBuild
+    displayName: 'Maven Build & Test'
+    steps:
+    - task: JavaToolInstaller@0
+      displayName: 'Setup Java 17'
+      inputs:
+        versionSpec: '17'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+
+    - task: Maven@4
+      displayName: 'Run Maven Tests'
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'test'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+
+    - task: Maven@4
+      displayName: 'Build JAR'
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'package -DskipTests'
+
+    - task: PublishPipelineArtifact@1
+      displayName: 'Save JAR Artifact'
+      inputs:
+        targetPath: '$(System.DefaultWorkingDirectory)/target'
+        artifact: 'jar-artifact'
+
+- stage: DockerBuildPush
+  displayName: 'Docker Build and Push'
+  dependsOn: BuildAndTest
+  condition: succeeded()
+  jobs:
+  - job: DockerJob
+    displayName: 'Build Docker Image and Push'
+    steps:
+    - task: Docker@2
+      displayName: 'Login to Docker Hub'
+      inputs:
+        command: 'login'
+        containerRegistry: 'dockerhub-connection'
+
+    - task: Docker@2
+      displayName: 'Build Docker Image'
+      inputs:
+        command: 'build'
+        Dockerfile: 'Dockerfile'
+        tags: '$(dockerHubUsername)/$(imageName):$(imageTag)'
+
+    - task: Docker@2
+      displayName: 'Push to Docker Hub'
+      inputs:
+        command: 'push'
+        containerRegistry: 'dockerhub-connection'
+        repository: '$(dockerHubUsername)/$(imageName)'
+        tags: |
+          $(imageTag)
+          latest
+
+    - task: Docker@2
+      displayName: 'Logout from Docker Hub'
+      inputs:
+        command: 'logout'
+        containerRegistry: 'dockerhub-connection'
